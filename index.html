@@ -28,7 +28,7 @@
   .nav-btn { font-weight: bold; padding: 0.4rem 0.6rem; background: #fff; }
   
   input[type="number"] { width: 45px; padding: .2rem; border: 1px solid #ccc; border-radius: 3px; }
-  select { padding: .4rem; max-width: 150px; border-radius: 3px; border: 1px solid #ccc; }
+  select { padding: .4rem; border-radius: 3px; border: 1px solid #ccc; }
   
   #wrap { display:grid; grid-template-columns:240px 1fr; height:calc(100vh - 54px); }
   aside { background:#fff; border-right:1px solid #e5e7eb; padding: 1rem; font-size:.85rem; overflow-y: auto; z-index: 5; }
@@ -67,13 +67,16 @@
   
   <div class="control-group">
     <span>探索: </span>
-    直線 S <input type="number" id="numS" value="6" min="0">
-    カーブ C <input type="number" id="numC" value="16" min="0">
-    交差上限 <input type="number" id="numCross" value="0" min="0" max="5">
+    直線 S <input type="number" id="numS" value="6" min="0" max="30" step="2">
+    カーブ C <input type="number" id="numC" value="16" min="0" max="48" step="4">
+    交差上限 <select id="numCross">
+      <option value="0" selected>0回</option>
+      <option value="1">1回まで</option>
+    </select>
     候補数 <input type="number" id="maxResults" value="50" min="1" max="200" style="width: 50px;">
     <button id="btnSearch" style="width: 80px; margin-left:5px;">自動探索</button>
     <button id="btnPrev" class="nav-btn" title="前の候補" style="margin-left:5px;">＜</button>
-    <select id="selResult"><option value="">結果なし</option></select>
+    <select id="selResult" style="max-width: 150px;"><option value="">結果なし</option></select>
     <button id="btnNext" class="nav-btn" title="次の候補">＞</button>
   </div>
 </header>
@@ -196,6 +199,49 @@ function getSegments(type, x, y, a, railIndex = 0) {
       {p1: {x: mx, y: my}, p2: {x: n.x, y: n.y}, railIndex}
     ];
   }
+}
+
+// ★追加：見つかったルートの「交差した回数」を正確に再計算する機能
+function getPathCrossCount(p) {
+  let cur = {x: 0, y: 0, a: 0};
+  let segments = [];
+  let crossCount = 0;
+  
+  for (let i = 0; i < p.length; i++) {
+    let type = p[i];
+    let n = calcNext(type, cur.x, cur.y, cur.a);
+    let newSegs = getSegments(type, cur.x, cur.y, cur.a, i);
+    const isLastPiece = (i === p.length - 1);
+
+    for (let s1 of newSegs) {
+      for (let s2 of segments) {
+        if (Math.abs(s1.railIndex - s2.railIndex) <= 1) continue;
+        if (isLastPiece && s2.railIndex === 0) continue;
+        
+        let intersected = false;
+        if (getLineIntersection(s1.p1, s1.p2, s2.p1, s2.p2)) {
+          crossCount++;
+          intersected = true;
+        }
+
+        let dist = distBetweenSegments(s1.p1, s1.p2, s2.p1, s2.p2);
+        if (dist < RAIL_W * 0.85) {
+          let v1x = s1.p2.x - s1.p1.x, v1y = s1.p2.y - s1.p1.y;
+          let v2x = s2.p2.x - s2.p1.x, v2y = s2.p2.y - s2.p1.y;
+          let len1 = Math.hypot(v1x, v1y) || 1;
+          let len2 = Math.hypot(v2x, v2y) || 1;
+          let cosTheta = Math.abs((v1x * v2x + v1y * v2y) / (len1 * len2));
+          
+          if (cosTheta <= 0.86 && !intersected) {
+            crossCount++; 
+          }
+        }
+      }
+    }
+    cur = n;
+    segments.push(...newSegs);
+  }
+  return crossCount;
 }
 
 function drawJoint(x, y, a) {
@@ -378,10 +424,19 @@ document.getElementById("btnSearch").onclick = () => {
   const maxCross = parseInt(document.getElementById("numCross").value) || 0; 
   const MAX_RESULTS = parseInt(document.getElementById("maxResults").value) || 30; 
   
+  if (S > 30 || C > 48) {
+    msgEl.innerHTML = `⚠️ <b>自動探索の上限オーバー</b><br><span style="font-size:0.85em; color:#6b7280;">計算量爆発を防ぐため、自動探索は「直線30本・カーブ48本」を上限としています。これ以上の巨大レイアウトは手動配置をご利用ください。</span>`;
+    return;
+  }
+
+  if (S % 2 !== 0) {
+    msgEl.innerHTML = `⚠️ <b>直線の数は偶数を推奨</b><br><span style="font-size:0.85em; color:#6b7280;">奇数本の直線ではループが閉じない可能性が非常に高いため、探索に時間がかかります。偶数に設定してください。</span>`;
+    return;
+  }
+
   const results = [];
   const uniqueShapeHashes = new Set(); 
 
-  // ★拡張：直線を細かく分散させるパターン予測を追加！
   function gcd(a, b) { return b ? gcd(b, a % b) : a; }
   let g = gcd(S, C);
   if (S === 0 && C > 0) g = C;
@@ -398,7 +453,6 @@ document.getElementById("btnSearch").onclick = () => {
     let subS = S / k;
     let subC = C / k;
     
-    // 基本パターン（固めて置く）
     idealPaths.push(('S'.repeat(subS) + 'L'.repeat(subC)).repeat(k));
     idealPaths.push(('L'.repeat(subC) + 'S'.repeat(subS)).repeat(k));
     
@@ -409,7 +463,6 @@ document.getElementById("btnSearch").onclick = () => {
       idealPaths.push(('S'.repeat(subS/2) + 'L'.repeat(subC) + 'S'.repeat(subS/2)).repeat(k));
     }
 
-    // ★追加：Sをさらに半分に割って交互に分散配置するパターン（例：SSLLLLSLLLL）
     if (subC >= 2 && subC % 2 === 0 && subS >= 2) {
       let s1 = Math.ceil(subS / 2);
       let s2 = Math.floor(subS / 2);
@@ -441,7 +494,12 @@ document.getElementById("btnSearch").onclick = () => {
         for (let s2 of segments) {
           if (Math.abs(s1.railIndex - s2.railIndex) <= 1) continue;
           if (isLastPiece && s2.railIndex === 0) continue;
-          if (getLineIntersection(s1.p1, s1.p2, s2.p1, s2.p2)) crossCount++;
+          
+          let intersected = false;
+          if (getLineIntersection(s1.p1, s1.p2, s2.p1, s2.p2)) {
+            crossCount++;
+            intersected = true;
+          }
 
           let dist = distBetweenSegments(s1.p1, s1.p2, s2.p1, s2.p2);
           if (dist < RAIL_W * 0.85) {
@@ -450,7 +508,12 @@ document.getElementById("btnSearch").onclick = () => {
             let len1 = Math.hypot(v1x, v1y) || 1;
             let len2 = Math.hypot(v2x, v2y) || 1;
             let cosTheta = Math.abs((v1x * v2x + v1y * v2y) / (len1 * len2));
-            if (cosTheta > 0.86) { isOverlap = true; break; }
+            
+            if (cosTheta > 0.86) {
+              isOverlap = true; break; 
+            } else if (!intersected) {
+              crossCount++; 
+            }
           }
         }
         if (isOverlap) break;
@@ -495,10 +558,18 @@ document.getElementById("btnSearch").onclick = () => {
     if (Math.abs(L - R) * 22.5 % 360 === 0) validPairs.push({ L, R });
   }
 
-  let stack = [];
+  let stackPhase1 = [];
+  let stackPhase2 = [];
+  
   for (let pair of validPairs) {
-    stack.push({ x: 0, y: 0, a: 0, remS: S, remL: pair.L, remR: pair.R, path: "", visited: [{x:0, y:0}], segments: [], crossCount: 0 });
+    if (pair.L % 4 === 0 && pair.R % 4 === 0) {
+        stackPhase1.push({ x: 0, y: 0, a: 0, remS: S, remL: pair.L, remR: pair.R, path: "", visited: [{x:0, y:0}], segments: [], crossCount: 0 });
+    }
+    stackPhase2.push({ x: 0, y: 0, a: 0, remS: S, remL: pair.L, remR: pair.R, path: "", visited: [{x:0, y:0}], segments: [], crossCount: 0 });
   }
+
+  let currentPhase = stackPhase1.length > 0 ? 1 : 2;
+  let stack = currentPhase === 1 ? stackPhase1 : stackPhase2;
 
   isSearching = true; abortSearch = false;
   btn.textContent = "中止 ■"; 
@@ -531,93 +602,134 @@ document.getElementById("btnSearch").onclick = () => {
         continue;
       }
 
-      function tryNext(type) {
-        let n = calcNext(type, x, y, a);
-        let remS_new = type === 'S' ? remS - 1 : remS;
-        let remL_new = type === 'L' ? remL - 1 : remL;
-        let remR_new = type === 'R' ? remR - 1 : remR;
-        
-        let railIndex = path.length;
-        let newSegs = getSegments(type, x, y, a, railIndex);
-        let cCount = crossCount;
-        let isOverlap = false;
+      function trySequence(seq) {
+        let n_x = x, n_y = y, n_a = a;
+        let t_visited = [...visited];
+        let t_segments = [...segments];
+        let t_crossCount = crossCount;
+        let t_remS = remS, t_remL = remL, t_remR = remR;
 
-        const isLastPiece = (remS_new === 0 && remL_new === 0 && remR_new === 0);
+        for (let i = 0; i < seq.length; i++) {
+          let type = seq[i];
+          if (type === 'S') t_remS--;
+          else if (type === 'L') t_remL--;
+          else if (type === 'R') t_remR--;
 
-        for (let s1 of newSegs) {
-          for (let s2 of segments) {
-            if (Math.abs(s1.railIndex - s2.railIndex) <= 1) continue;
-            if (isLastPiece && s2.railIndex === 0) continue;
-            if (getLineIntersection(s1.p1, s1.p2, s2.p1, s2.p2)) {
-              cCount++;
-            }
+          let n = calcNext(type, n_x, n_y, n_a);
+          let railIndex = path.length + i;
+          let newSegs = getSegments(type, n_x, n_y, n_a, railIndex);
 
-            let dist = distBetweenSegments(s1.p1, s1.p2, s2.p1, s2.p2);
-            if (dist < RAIL_W * 0.85) {
-              let v1x = s1.p2.x - s1.p1.x, v1y = s1.p2.y - s1.p1.y;
-              let v2x = s2.p2.x - s2.p1.x, v2y = s2.p2.y - s2.p1.y;
-              let len1 = Math.hypot(v1x, v1y) || 1;
-              let len2 = Math.hypot(v2x, v2y) || 1;
-              let cosTheta = Math.abs((v1x * v2x + v1y * v2y) / (len1 * len2));
+          let isOverlap = false;
+          const isLastPiece = (t_remS === 0 && t_remL === 0 && t_remR === 0);
+
+          for (let s1 of newSegs) {
+            for (let s2 of t_segments) {
+              if (Math.abs(s1.railIndex - s2.railIndex) <= 1) continue;
+              if (isLastPiece && s2.railIndex === 0) continue;
               
-              if (cosTheta > 0.86) {
-                isOverlap = true;
-                break;
+              let intersected = false;
+              if (getLineIntersection(s1.p1, s1.p2, s2.p1, s2.p2)) {
+                t_crossCount++;
+                intersected = true;
+              }
+
+              let dist = distBetweenSegments(s1.p1, s1.p2, s2.p1, s2.p2);
+              if (dist < RAIL_W * 0.85) {
+                let v1x = s1.p2.x - s1.p1.x, v1y = s1.p2.y - s1.p1.y;
+                let v2x = s2.p2.x - s2.p1.x, v2y = s2.p2.y - s2.p1.y;
+                let len1 = Math.hypot(v1x, v1y) || 1;
+                let len2 = Math.hypot(v2x, v2y) || 1;
+                let cosTheta = Math.abs((v1x * v2x + v1y * v2y) / (len1 * len2));
+                
+                if (cosTheta > 0.86) {
+                  isOverlap = true; break; 
+                } else if (!intersected) {
+                  t_crossCount++; 
+                }
+              }
+            }
+            if (isOverlap) break;
+          }
+          
+          if (t_crossCount > maxCross) return;
+          if (isOverlap) return;
+
+          let isCollision = false;
+          for (let j = 0; j < t_visited.length - 1; j++) {
+            const vj = t_visited[j];
+            if (Math.hypot(n.x - vj.x, n.y - vj.y) < 10) {
+              if (!(isLastPiece && j === 0)) {
+                isCollision = true; break;
               }
             }
           }
-          if (isOverlap) break;
-        }
-        
-        if (cCount > maxCross) return;
-        if (isOverlap) return;
+          if (isCollision) return;
 
-        let isCollision = false;
-        for (let i = 0; i < visited.length - 1; i++) {
-          const vj = visited[i];
-          if (Math.hypot(n.x - vj.x, n.y - vj.y) < 10) {
-            if (!(isLastPiece && i === 0)) {
-              isCollision = true; break;
-            }
-          }
+          n_x = n.x; n_y = n.y; n_a = n.a;
+          t_visited.push({x: n_x, y: n_y});
+          t_segments.push(...newSegs);
         }
-        if (isCollision) return;
 
         stack.push({
-          x: n.x, y: n.y, a: n.a,
-          remS: remS_new, remL: remL_new, remR: remR_new,
-          path: path + type,
-          visited: [...visited, {x: n.x, y: n.y}],
-          segments: [...segments, ...newSegs], 
-          crossCount: cCount
+          x: n_x, y: n_y, a: n_a,
+          remS: t_remS, remL: t_remL, remR: t_remR,
+          path: path + seq,
+          visited: t_visited,
+          segments: t_segments,
+          crossCount: t_crossCount
         });
       }
 
-      let nextTypes = [];
-      if (remR > 0) nextTypes.push('R');
-      if (remL > 0) nextTypes.push('L');
-      if (remS > 0) nextTypes.push('S');
+      let options = [];
       
-      for (let i = nextTypes.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [nextTypes[i], nextTypes[j]] = [nextTypes[j], nextTypes[i]];
+      if (currentPhase === 1) {
+          if (remL >= 4) options.push('LLLL');
+          if (remR >= 4) options.push('RRRR');
+          if (remS > 0) options.push('S');
+          
+          if ((remL > 0 && remL < 4) || (remR > 0 && remR < 4)) {
+              options = [];
+          }
+      } else {
+          if (remL > 0) options.push('L');
+          if (remR > 0) options.push('R');
+          if (remS > 0) options.push('S');
+          
+          options.sort(() => Math.random() - 0.5);
+          
+          let lastType = path.slice(-1);
+          if (lastType && options.includes(lastType) && Math.random() < 0.7) {
+              options = options.filter(t => t !== lastType);
+              options.push(lastType); 
+          }
       }
 
-      let lastType = path.slice(-1);
-      if (lastType && nextTypes.includes(lastType) && Math.random() < 0.7) {
-        nextTypes = nextTypes.filter(t => t !== lastType);
-        nextTypes.push(lastType);
+      for (let opt of options) {
+        trySequence(opt);
       }
+    }
 
-      for (let t of nextTypes) tryNext(t);
+    if (stack.length === 0 && currentPhase === 1 && !abortSearch && results.length < MAX_RESULTS) {
+        currentPhase = 2;
+        stack = stackPhase2;
+        requestAnimationFrame(processChunk);
+        return;
     }
 
     const elapsedSec = ((performance.now() - startTime) / 1000).toFixed(1);
 
+    if (elapsedSec > 180 && !abortSearch) {
+      abortSearch = true;
+      finalizeSearch(`⚠️ タイムアウト（3分打ち切り）`);
+      msgEl.innerHTML += `<br><span style="font-size:0.8em; color:#991b1b;">この組み合わせでは美しい配置が見つかりませんでした。条件を変えるか、手動配置をお試しください。</span>`;
+      return;
+    }
+
     if (abortSearch) {
       finalizeSearch(`中止されました (${elapsedSec}秒)`);
     } else if (stack.length > 0 && results.length < MAX_RESULTS) {
-      msgEl.innerHTML = `⏳ シンキング: <strong style="color:#d32f2f;">${elapsedSec} 秒</strong><br><span style="font-size:0.8em; color:#6b7280;">抽出済: ${results.length} / ${MAX_RESULTS} 件<br>探索キュー残り: ${stack.length.toLocaleString()}件</span>`;
+      let phaseStr = currentPhase === 1 ? "高速90度ブロック" : "詳細1パーツ";
+      msgEl.innerHTML = `⏳ シンキング (フェーズ${currentPhase}: ${phaseStr}): <strong style="color:#d32f2f;">${elapsedSec} 秒</strong><br><span style="font-size:0.8em; color:#6b7280;">抽出済: ${results.length} / ${MAX_RESULTS} 件<br>探索キュー残り: ${stack.length.toLocaleString()}件</span>`;
       requestAnimationFrame(processChunk);
     } else {
       finalizeSearch(`完了: ${elapsedSec}秒`);
@@ -630,16 +742,46 @@ document.getElementById("btnSearch").onclick = () => {
     btn.style.background = "#ffca28"; 
     btn.style.color = "#111";
     
-    results.sort((a, b) => evaluateShapeScore(b) - evaluateShapeScore(a));
+    // ★追加：設定された交差上限を取得
+    const currentMaxCross = parseInt(document.getElementById("numCross").value) || 0;
+    
+    // ★変更：交差上限が「1」なら、クロスしたものを最優先に並び替える
+    results.sort((a, b) => {
+      if (currentMaxCross > 0) {
+        let crossA = getPathCrossCount(a);
+        let crossB = getPathCrossCount(b);
+        if (crossA !== crossB) {
+            return crossB - crossA; // クロスしている方がスコア高（降順）
+        }
+      }
+      return evaluateShapeScore(b) - evaluateShapeScore(a);
+    });
 
-    msgEl.innerHTML = `✅ ${statusMsg}<br><span style="font-size:0.8em; color:#6b7280;">${results.length}件の異なるシルエットを発見</span>`;
+    if (!msgEl.innerHTML.includes("タイムアウト") && !msgEl.innerHTML.includes("推奨") && !msgEl.innerHTML.includes("上限オーバー")) {
+        msgEl.innerHTML = `✅ ${statusMsg}<br><span style="font-size:0.8em; color:#6b7280;">${results.length}件の異なるシルエットを発見</span>`;
+    }
+    
     const sel = document.getElementById("selResult");
     sel.innerHTML = results.length ? "" : "<option value=''>結果なし</option>";
+    
+    // ★追加：プルダウンの名前の横に「🔀」マークを表示
     results.forEach((r, i) => {
-      const opt = document.createElement("option"); opt.value = r; opt.textContent = `候補 ${i+1}`; sel.appendChild(opt);
+      const opt = document.createElement("option"); 
+      opt.value = r; 
+      
+      let crossStr = "";
+      if (currentMaxCross > 0 && getPathCrossCount(r) > 0) {
+        crossStr = " 🔀(交差あり)";
+      }
+      
+      opt.textContent = `候補 ${i+1}${crossStr}`; 
+      sel.appendChild(opt);
     });
+
     if(results.length) { courseStr = results[0]; fitToScreen(); }
-    else { badge.textContent = "未配置"; badge.className = "status-badge"; }
+    else if (!msgEl.innerHTML.includes("タイムアウト") && !msgEl.innerHTML.includes("上限オーバー") && !msgEl.innerHTML.includes("推奨")) { 
+        badge.textContent = "未配置"; badge.className = "status-badge"; 
+    }
   }
 
   requestAnimationFrame(processChunk);
@@ -654,10 +796,12 @@ function navigateResults(dir) {
 document.getElementById("btnPrev").onclick = () => navigateResults(-1);
 document.getElementById("btnNext").onclick = () => navigateResults(1);
 document.getElementById("btnFit").onclick = fitToScreen;
+
 document.getElementById("btnS").onclick = () => { courseStr += "S"; render(); };
 document.getElementById("btnL").onclick = () => { courseStr += "L"; render(); };
 document.getElementById("btnR").onclick = () => { courseStr += "R"; render(); };
 document.getElementById("btnUndo").onclick = () => { courseStr = courseStr.slice(0,-1); render(); };
+
 document.getElementById("btnReset").onclick = () => { courseStr = ""; fitToScreen(); };
 document.getElementById("selResult").onchange = (e) => { if(e.target.value){ courseStr = e.target.value; fitToScreen(); }};
 
@@ -673,7 +817,7 @@ cv.addEventListener('wheel', e => {
 }, { passive: false });
 
 window.addEventListener("keydown", e => {
-  if (e.target.tagName === 'INPUT') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (e.code === 'Space') { 
     e.preventDefault(); 
     isSpaceDown = true; 
