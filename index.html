@@ -170,7 +170,7 @@ function getLineIntersection(p0, p1, p2, p3) {
   if (Math.abs(denom) < 0.001) return false; 
   let s = (-s1_y * (p0.x - p2.x) + s1_x * (p0.y - p2.y)) / denom;
   let t = ( s2_x * (p0.y - p2.y) - s2_y * (p0.x - p2.x)) / denom;
-  if (s > 0.01 && s < 0.99 && t > 0.01 && t < 0.99) return true;
+  if (s >= -0.01 && s <= 1.01 && t >= -0.01 && t <= 1.01) return true;
   return false;
 }
 
@@ -439,9 +439,9 @@ document.getElementById("btnSearch").onclick = () => {
 
       for (let s1 of newSegs) {
         for (let s2 of segments) {
-          if (getLineIntersection(s1.p1, s1.p2, s2.p1, s2.p2)) crossCount++;
           if (Math.abs(s1.railIndex - s2.railIndex) <= 1) continue;
           if (isLastPiece && s2.railIndex === 0) continue;
+          if (getLineIntersection(s1.p1, s1.p2, s2.p1, s2.p2)) crossCount++;
 
           let dist = distBetweenSegments(s1.p1, s1.p2, s2.p1, s2.p2);
           if (dist < RAIL_W * 0.85) {
@@ -546,11 +546,11 @@ document.getElementById("btnSearch").onclick = () => {
 
         for (let s1 of newSegs) {
           for (let s2 of segments) {
+            if (Math.abs(s1.railIndex - s2.railIndex) <= 1) continue;
+            if (isLastPiece && s2.railIndex === 0) continue;
             if (getLineIntersection(s1.p1, s1.p2, s2.p1, s2.p2)) {
               cCount++;
             }
-            if (Math.abs(s1.railIndex - s2.railIndex) <= 1) continue;
-            if (isLastPiece && s2.railIndex === 0) continue;
 
             let dist = distBetweenSegments(s1.p1, s1.p2, s2.p1, s2.p2);
             if (dist < RAIL_W * 0.85) {
