@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>カププラ・シミュレーター（直感パターン完全版）</title>
+<style>
+  body { margin:0; font-family:system-ui, -apple-system, sans-serif; background:#f7f7fb; overflow:hidden; }
+  
+  header { 
+    background: #1970c1; 
+    color: #ffffff;
+    padding: .6rem .8rem; 
+    border-bottom: 4px solid #ffca28; 
+    display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; z-index: 10; position: relative;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  }
+  
+  button { 
+    padding: .4rem .8rem; cursor: pointer; border: none; background: #f0f0f0; 
+    border-radius: 4px; color: #333; font-weight: bold; box-shadow: 0 2px 0 #ccc;
+    transition: all 0.1s;
+  }
+  button:hover { background: #ffffff; transform: translateY(1px); box-shadow: 0 1px 0 #ccc; }
+  button:active { transform: translateY(2px); box-shadow: none; }
+  
+  #btnSearch { background: #ffca28; color: #111; box-shadow: 0 2px 0 #d4a000; }
+  #btnSearch:hover { background: #ffd54f; }
+  .nav-btn { font-weight: bold; padding: 0.4rem 0.6rem; background: #fff; }
+  
+  input[type="number"] { width: 45px; padding: .2rem; border: 1px solid #ccc; border-radius: 3px; }
+  select { padding: .4rem; max-width: 150px; border-radius: 3px; border: 1px solid #ccc; }
+  
+  #wrap { display:grid; grid-template-columns:240px 1fr; height:calc(100vh - 54px); }
+  aside { background:#fff; border-right:1px solid #e5e7eb; padding: 1rem; font-size:.85rem; overflow-y: auto; z-index: 5; }
+  
+  #canvas-wrap { position: relative; width: 100%; height: 100%; overflow: hidden; background: #fff; }
+  canvas { position: absolute; top: 0; left: 0; display:block; cursor: default; }
+  canvas.grab { cursor: grab; }
+  canvas.grabbing { cursor: grabbing; }
+  
+  #logo { position: absolute; bottom: 20px; right: 20px; height: 50px; opacity: 0.85; pointer-events: none; z-index: 2; }
+  
+  .status-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-weight: bold; margin-top: 5px; font-size: 0.9rem;}
+  .perfect { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0;}
+  .distorted { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca;}
+  .muted { color:#6b7280; font-size:.75rem; display: block; margin-top: 4px;}
+  
+  .control-group { 
+    border-left: 2px solid rgba(255,255,255,0.4); 
+    padding-left: 0.6rem; margin-left: 0.2rem;
+    display: flex; align-items: center; gap: 0.4rem;
+  }
+  code { background: #f3f4f6; color:#333; padding: 3px 5px; border-radius: 3px; word-break: break-all; font-family: monospace; display: inline-block; margin-top: 3px;}
+  
+  .info-panel p { margin: 8px 0; }
+  .highlight-num { font-weight: bold; color: #1970c1; font-size: 1.1em; }
+</style>
+</head>
+<body>
+<header>
+  <button id="btnS">直線 S</button>
+  <button id="btnL">左 L</button>
+  <button id="btnR">右 R</button>
+  <button id="btnUndo">戻す</button>
+  <button id="btnReset">クリア</button>
+  <button id="btnFit">画面にフィット</button>
+  
+  <div class="control-group">
+    <span>探索: </span>
+    直線 S <input type="number" id="numS" value="6" min="0">
+    カーブ C <input type="number" id="numC" value="16" min="0">
+    交差上限 <input type="number" id="numCross" value="0" min="0" max="5">
+    候補数 <input type="number" id="maxResults" value="50" min="1" max="200" style="width: 50px;">
+    <button id="btnSearch" style="width: 80px; margin-left:5px;">自動探索</button>
+    <button id="btnPrev" class="nav-btn" title="前の候補" style="margin-left:5px;">＜</button>
+    <select id="selResult"><option value="">結果なし</option></select>
+    <button id="btnNext" class="nav-btn" title="次の候補">＞</button>
+  </div>
+</header>
+
+<div id="wrap">
+  <aside>
+    <div id="judgeArea">
+      <strong>【状態判定】</strong><br>
+      <div id="statusBadge" class="status-badge">---</div>
+      <p id="errorMsg" style="color:#991b1b; font-weight:bold; margin-top:8px; line-height:1.4;"></p>
+    </div>
+    <hr>
+    <div class="info-panel">
+      <p>現在の配列：<br><code id="seq">(空)</code></p>
+      <p>使用パーツ：直線 <span id="cntS" class="highlight-num">0</span> 本 / カーブ <span id="cntC" class="highlight-num">0</span> 本</p>
+      <p>終端角度：<span id="ang" class="highlight-num">0°</span></p>
+      <p>終端位置：(<span id="posx" class="highlight-num">0</span>, <span id="posy" class="highlight-num">0</span>)</p>
+    </div>
+    <hr>
+    <span class="muted">・ホイール回転：拡大縮小</span>
+    <span class="muted">・中ボタン or スペース+ドラッグ：移動</span>
+    <span class="muted">・← →キー：候補切替</span>
+  </aside>
+  <div id="canvas-wrap">
+    <canvas id="cv"></canvas>
+    <img id="logo" src="Gemini_Generated_Image_cut.png" alt="カプセルプラシーボ">
+  </div>
+</div>
+
+<script>
+const CM_S_LENGTH = 5.5; 
+const CM_C_RADIUS = 14.25; 
+const CM_RAIL_W   = 2.2;   
+
+const PX_PER_CM = 20;
+const UNIT_S = CM_S_LENGTH * PX_PER_CM;   
+const RADIUS = CM_C_RADIUS * PX_PER_CM;   
+const RAIL_W = CM_RAIL_W * PX_PER_CM;     
+
+const ARC = 22.5;
+const LINE_W = [RAIL_W, RAIL_W * (14/16), RAIL_W * (9/16), RAIL_W * (7/16)];
+const COL = ["#1970c1","#51b5ff","#1970c1","#51b5ff"];
+
+const TOLERANCE_DIST = UNIT_S * 0.3; 
+const TOLERANCE_ANGLE = 15;
+const PERFECT_DIST = 2.5;
+const PERFECT_ANGLE = 2.5;
+
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+let dpr = window.devicePixelRatio || 1, cw=0, ch=0;
+let cvRect = { left: 0, top: 0 };
+
+let courseStr = "";
+let offsetX = -150, offsetY = 0, scale = 1.0;
+let isSpaceDown = false, isDragging = false, dragStartX = 0, dragStartY = 0;
+let isSearching = false, abortSearch = false;
+
+const rad = d => d * Math.PI / 180;
+const norm = a => ((a % 360) + 360) % 360;
+
+function calcNext(type, x, y, a) {
+  if (type === 'S') return { x: x + UNIT_S * Math.cos(rad(a)), y: y + UNIT_S * Math.sin(rad(a)), a: a };
+  if (type === 'L') {
+    const cx = x - RADIUS * Math.sin(rad(a)), cy = y + RADIUS * Math.cos(rad(a));
+    return { x: cx + RADIUS * Math.cos(rad(a - 90 + ARC)), y: cy + RADIUS * Math.sin(rad(a - 90 + ARC)), a: norm(a + ARC) };
+  } else {
+    const cx = x + RADIUS * Math.sin(rad(a)), cy = y - RADIUS * Math.cos(rad(a));
+    return { x: cx + RADIUS * Math.cos(rad(a + 90 - ARC)), y: cy + RADIUS * Math.sin(rad(a + 90 - ARC)), a: norm(a - ARC) };
+  }
+}
+
+function sqr(x) { return x * x; }
+function dist2(v, w) { return sqr(v.x - w.x) + sqr(v.y - w.y); }
+function distToSegmentSquared(p, v, w) {
+  let l2 = dist2(v, w);
+  if (l2 === 0) return dist2(p, v);
+  let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return dist2(p, { x: v.x + t * (w.x - v.x), y: v.y + t * (w.y - v.y) });
+}
+function distBetweenSegments(p1, p2, p3, p4) {
+  let d1 = distToSegmentSquared(p1, p3, p4);
+  let d2 = distToSegmentSquared(p2, p3, p4);
+  let d3 = distToSegmentSquared(p3, p1, p2);
+  let d4 = distToSegmentSquared(p4, p1, p2);
+  return Math.sqrt(Math.min(d1, d2, d3, d4));
+}
+
+function getLineIntersection(p0, p1, p2, p3) {
+  let s1_x = p1.x - p0.x, s1_y = p1.y - p0.y;
+  let s2_x = p3.x - p2.x, s2_y = p3.y - p2.y;
+  let denom = -s2_x * s1_y + s1_x * s2_y;
+  if (Math.abs(denom) < 0.001) return false; 
+  let s = (-s1_y * (p0.x - p2.x) + s1_x * (p0.y - p2.y)) / denom;
+  let t = ( s2_x * (p0.y - p2.y) - s2_y * (p0.x - p2.x)) / denom;
+  if (s > 0.01 && s < 0.99 && t > 0.01 && t < 0.99) return true;
+  return false;
+}
+
+function getSegments(type, x, y, a, railIndex = 0) {
+  if (type === 'S') {
+    let n = calcNext('S', x, y, a);
+    return [{p1: {x,y}, p2: {x: n.x, y: n.y}, railIndex}];
+  } else {
+    let isL = (type === 'L');
+    let cx2 = x - RADIUS * Math.sin(rad(a));
+    let cy2 = y + RADIUS * Math.cos(rad(a));
+    let mx = cx2 + RADIUS * Math.cos(rad(a - 90 + ARC/2));
+    let my = cy2 + RADIUS * Math.sin(rad(a - 90 + ARC/2));
+    if (!isL) {
+      cx2 = x + RADIUS * Math.sin(rad(a));
+      cy2 = y - RADIUS * Math.cos(rad(a));
+      mx = cx2 + RADIUS * Math.cos(rad(a + 90 - ARC/2));
+      my = cy2 + RADIUS * Math.sin(rad(a + 90 - ARC/2));
+    }
+    let n = calcNext(type, x, y, a);
+    return [
+      {p1: {x,y}, p2: {x: mx, y: my}, railIndex},
+      {p1: {x: mx, y: my}, p2: {x: n.x, y: n.y}, railIndex}
+    ];
+  }
+}
+
+function drawJoint(x, y, a) {
+  ctx.save();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "#000000"; 
+  ctx.beginPath();
+  const len = (RAIL_W / 2) + 4;
+  const px = len * Math.cos(rad(a + 90));
+  const py = len * Math.sin(rad(a + 90));
+  ctx.moveTo(x - px, y - py); ctx.lineTo(x + px, y + py); ctx.stroke();
+  ctx.restore();
+}
+
+function render() {
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.translate(cw/2 + offsetX, ch/2 + offsetY);
+  ctx.scale(scale, scale);
+
+  ctx.strokeStyle = "#ddd"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-40,0); ctx.lineTo(40,0); ctx.moveTo(0,-40); ctx.lineTo(0,40); ctx.stroke();
+  
+  let cur = { x:0, y:0, a:0 };
+  let joints = [{x: 0, y: 0, a: 0}]; 
+
+  for (let c of courseStr) {
+    const next = calcNext(c, cur.x, cur.y, cur.a);
+    if (c === 'S') {
+      for(let i=0; i<4; i++){ ctx.lineWidth=LINE_W[i]; ctx.strokeStyle=COL[i]; ctx.beginPath(); ctx.moveTo(cur.x, cur.y); ctx.lineTo(next.x, next.y); ctx.stroke(); }
+    } else {
+      const isL = (c === 'L');
+      const cx = cur.x + RADIUS * Math.sin(rad(cur.a)) * (isL ? -1 : 1);
+      const cy = cur.y + RADIUS * Math.cos(rad(cur.a)) * (isL ? 1 : -1);
+      const sa = rad(cur.a + (isL ? -90 : 90 - ARC));
+      const ea = rad(cur.a + (isL ? -90 + ARC : 90));
+      for(let i=0; i<4; i++){ ctx.lineWidth=LINE_W[i]; ctx.strokeStyle=COL[i]; ctx.beginPath(); ctx.arc(cx, cy, RADIUS, sa, ea, false); ctx.stroke(); }
+    }
+    joints.push(next); cur = next;
+  }
+  for (let j of joints) drawJoint(j.x, j.y, j.a);
+  updateUI(cur);
+}
+
+function updateUI(end) {
+  document.getElementById("seq").textContent = courseStr || "(空)";
+  
+  const countS = (courseStr.match(/S/g) || []).length;
+  const countC = (courseStr.match(/[LR]/g) || []).length;
+  document.getElementById("cntS").textContent = countS;
+  document.getElementById("cntC").textContent = countC;
+
+  document.getElementById("ang").textContent = Math.round(end.a) + "°";
+  document.getElementById("posx").textContent = Math.round(end.x);
+  document.getElementById("posy").textContent = Math.round(end.y);
+  
+  if (isSearching) return;
+
+  const badge = document.getElementById("statusBadge");
+  const errorMsg = document.getElementById("errorMsg");
+  if (!courseStr) { badge.textContent = "未配置"; badge.className = "status-badge"; errorMsg.textContent = ""; return; }
+  const dist = Math.hypot(end.x, end.y);
+  let aDiff = norm(end.a); if (aDiff > 180) aDiff = 360 - aDiff;
+  if (dist < PERFECT_DIST && aDiff < PERFECT_ANGLE) {
+    badge.textContent = "正確（接続可）"; badge.className = "status-badge perfect"; errorMsg.textContent = "";
+  } else if (dist < TOLERANCE_DIST && aDiff < TOLERANCE_ANGLE) {
+    badge.textContent = "歪みあり（接続可）"; badge.className = "status-badge distorted"; errorMsg.textContent = "⚠️ 物理的なしなりで接続可能";
+  } else {
+    badge.textContent = "未完成"; badge.className = "status-badge"; errorMsg.textContent = "ルートが閉じていません";
+  }
+}
+
+function fitToScreen() {
+  if (!courseStr) { scale = 1.0; offsetX = -150; offsetY = 0; render(); return; }
+  let minX = 0, maxX = 0, minY = 0, maxY = 0;
+  let cur = {x:0, y:0, a:0};
+  for(let c of courseStr) {
+    let next = calcNext(c, cur.x, cur.y, cur.a);
+    minX = Math.min(minX, cur.x, next.x); maxX = Math.max(maxX, cur.x, next.x);
+    minY = Math.min(minY, cur.y, next.y); maxY = Math.max(maxY, cur.y, next.y);
+    cur = next;
+  }
+  minX -= RADIUS; maxX += RADIUS; minY -= RADIUS; maxY += RADIUS;
+  const lw = maxX - minX || 1, lh = maxY - minY || 1;
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  const pad = 100;
+  scale = Math.min((cw - pad) / lw, (ch - pad) / lh, 1.5);
+  offsetX = -cx * scale; offsetY = -cy * scale;
+  render();
+}
+
+function getCanonical(p) {
+  const rev = p.split('').reverse().map(c => c==='L'?'R':(c==='R'?'L':'S')).join('');
+  const mir = p.split('').map(c => c==='L'?'R':(c==='R'?'L':'S')).join('');
+  const revMir = p.split('').reverse().join('');
+  let minStr = p;
+  const bases = [p, rev, mir, revMir];
+  for (let b of bases) {
+    for (let i = 0; i < p.length; i++) {
+      let s = b.slice(i) + b.slice(0, i);
+      if (s < minStr) minStr = s;
+    }
+  }
+  return minStr;
+}
+
+function getShapeHash(canonicalPath) {
+  const GRID_PX = 10 * PX_PER_CM; 
+  let pts = [{x: 0, y: 0}];
+  let cur = {x: 0, y: 0, a: 0};
+  let minX = 0, minY = 0;
+  
+  let topology = "";
+  let lastType = "";
+
+  for (let c of canonicalPath) {
+    if (c !== lastType) {
+      topology += c;
+      lastType = c;
+    }
+    cur = calcNext(c, cur.x, cur.y, cur.a);
+    pts.push({x: cur.x, y: cur.y});
+    if (cur.x < minX) minX = cur.x;
+    if (cur.y < minY) minY = cur.y;
+  }
+
+  let cells = new Set();
+  for (let p of pts) {
+    let cx = Math.floor((p.x - minX) / GRID_PX);
+    let cy = Math.floor((p.y - minY) / GRID_PX);
+    cells.add(`${cx},${cy}`);
+  }
+  let cellArr = Array.from(cells);
+  cellArr.sort();
+  return topology + '|' + cellArr.join('|');
+}
+
+function evaluateShapeScore(path) {
+  let score = 0;
+  let len = path.length;
+  if (len === 0) return 0;
+  let doublePath = path + path;
+  
+  let rotSym = 0;
+  for (let i = 0; i < len; i++) {
+    if (doublePath.slice(i, i + len) === path) rotSym++;
+  }
+  score += rotSym * 2000; 
+
+  let revPath = path.split('').reverse().join('');
+  let refSym = 0;
+  for (let i = 0; i < len; i++) {
+    if (doublePath.slice(i, i + len) === revPath) refSym++;
+  }
+  score += refSym * 500;
+
+  let changes = 0;
+  for (let i = 0; i < len; i++) {
+    let nextIdx = (i + 1) % len;
+    if (path[i] !== path[nextIdx]) changes++;
+  }
+  score -= changes * 10; 
+
+  return score;
+}
+
+// ==========================================
+// 探索ロジック
+// ==========================================
+document.getElementById("btnSearch").onclick = () => {
+  const btn = document.getElementById("btnSearch");
+  const msgEl = document.getElementById("errorMsg");
+  const badge = document.getElementById("statusBadge");
+
+  if (isSearching) { abortSearch = true; return; }
+
+  const S = parseInt(document.getElementById("numS").value) || 0;
+  const C = parseInt(document.getElementById("numC").value) || 0;
+  const maxCross = parseInt(document.getElementById("numCross").value) || 0; 
+  const MAX_RESULTS = parseInt(document.getElementById("maxResults").value) || 30; 
+  
+  const results = [];
+  const uniqueShapeHashes = new Set(); 
+
+  // ★拡張：直線を細かく分散させるパターン予測を追加！
+  function gcd(a, b) { return b ? gcd(b, a % b) : a; }
+  let g = gcd(S, C);
+  if (S === 0 && C > 0) g = C;
+  if (C === 0 && S > 0) g = S;
+  
+  let commonDivisors = [];
+  for (let i = g; i > 0; i--) {
+    if (S % i === 0 && C % i === 0) commonDivisors.push(i);
+  }
+
+  let idealPaths = [];
+  for (let k of commonDivisors) {
+    if (k === 1 && S > 0 && C > 0) continue; 
+    let subS = S / k;
+    let subC = C / k;
+    
+    // 基本パターン（固めて置く）
+    idealPaths.push(('S'.repeat(subS) + 'L'.repeat(subC)).repeat(k));
+    idealPaths.push(('L'.repeat(subC) + 'S'.repeat(subS)).repeat(k));
+    
+    if (subC >= 2 && subC % 2 === 0) {
+      idealPaths.push(('L'.repeat(subC/2) + 'S'.repeat(subS) + 'L'.repeat(subC/2)).repeat(k));
+    }
+    if (subS >= 2 && subS % 2 === 0) {
+      idealPaths.push(('S'.repeat(subS/2) + 'L'.repeat(subC) + 'S'.repeat(subS/2)).repeat(k));
+    }
+
+    // ★追加：Sをさらに半分に割って交互に分散配置するパターン（例：SSLLLLSLLLL）
+    if (subC >= 2 && subC % 2 === 0 && subS >= 2) {
+      let s1 = Math.ceil(subS / 2);
+      let s2 = Math.floor(subS / 2);
+      let c1 = subC / 2;
+      idealPaths.push(('S'.repeat(s1) + 'L'.repeat(c1) + 'S'.repeat(s2) + 'L'.repeat(c1)).repeat(k));
+    }
+    if (subS >= 2 && subS % 2 === 0 && subC >= 2) {
+      let c1 = Math.ceil(subC / 2);
+      let c2 = Math.floor(subC / 2);
+      let s1 = subS / 2;
+      idealPaths.push(('L'.repeat(c1) + 'S'.repeat(s1) + 'L'.repeat(c2) + 'S'.repeat(s1)).repeat(k));
+    }
+  }
+
+  function checkIdealPath(p) {
+    let cur = {x: 0, y: 0, a: 0};
+    let visited = [{x:0, y:0}];
+    let segments = [];
+    let crossCount = 0;
+    
+    for (let i = 0; i < p.length; i++) {
+      let type = p[i];
+      let n = calcNext(type, cur.x, cur.y, cur.a);
+      let newSegs = getSegments(type, cur.x, cur.y, cur.a, i);
+      let isOverlap = false;
+      const isLastPiece = (i === p.length - 1);
+
+      for (let s1 of newSegs) {
+        for (let s2 of segments) {
+          if (getLineIntersection(s1.p1, s1.p2, s2.p1, s2.p2)) crossCount++;
+          if (Math.abs(s1.railIndex - s2.railIndex) <= 1) continue;
+          if (isLastPiece && s2.railIndex === 0) continue;
+
+          let dist = distBetweenSegments(s1.p1, s1.p2, s2.p1, s2.p2);
+          if (dist < RAIL_W * 0.85) {
+            let v1x = s1.p2.x - s1.p1.x, v1y = s1.p2.y - s1.p1.y;
+            let v2x = s2.p2.x - s2.p1.x, v2y = s2.p2.y - s2.p1.y;
+            let len1 = Math.hypot(v1x, v1y) || 1;
+            let len2 = Math.hypot(v2x, v2y) || 1;
+            let cosTheta = Math.abs((v1x * v2x + v1y * v2y) / (len1 * len2));
+            if (cosTheta > 0.86) { isOverlap = true; break; }
+          }
+        }
+        if (isOverlap) break;
+      }
+      
+      if (crossCount > maxCross || isOverlap) return false;
+
+      let isCollision = false;
+      for (let j = 0; j < visited.length - 1; j++) {
+        const vj = visited[j];
+        if (Math.hypot(n.x - vj.x, n.y - vj.y) < 10) {
+          if (!(isLastPiece && j === 0)) { isCollision = true; break; }
+        }
+      }
+      if (isCollision) return false;
+
+      cur = n;
+      visited.push({x: cur.x, y: cur.y});
+      segments.push(...newSegs);
+    }
+    
+    const dist = Math.hypot(cur.x, cur.y);
+    let aDiff = norm(cur.a); if (aDiff > 180) aDiff = 360 - aDiff;
+    if (dist < PERFECT_DIST && aDiff < PERFECT_ANGLE) return true;
+    return false;
+  }
+
+  for (let p of idealPaths) {
+    if (checkIdealPath(p)) {
+      const can = getCanonical(p);
+      const shapeHash = getShapeHash(can);
+      if (!uniqueShapeHashes.has(shapeHash)) {
+        uniqueShapeHashes.add(shapeHash);
+        results.push(p);
+      }
+    }
+  }
+
+  const validPairs = [];
+  for (let L = 0; L <= C; L++) {
+    let R = C - L; 
+    if (Math.abs(L - R) * 22.5 % 360 === 0) validPairs.push({ L, R });
+  }
+
+  let stack = [];
+  for (let pair of validPairs) {
+    stack.push({ x: 0, y: 0, a: 0, remS: S, remL: pair.L, remR: pair.R, path: "", visited: [{x:0, y:0}], segments: [], crossCount: 0 });
+  }
+
+  isSearching = true; abortSearch = false;
+  btn.textContent = "中止 ■"; 
+  btn.style.background = "#d32f2f"; 
+  btn.style.color = "#fff";
+  badge.textContent = "探索中..."; badge.className = "status-badge";
+  const startTime = performance.now();
+
+  function processChunk() {
+    const chunkEndTime = performance.now() + 30;
+
+    while (stack.length > 0 && performance.now() < chunkEndTime) {
+      if (abortSearch || results.length >= MAX_RESULTS) { stack = []; break; }
+
+      const curr = stack.pop();
+      const { x, y, a, remS, remL, remR, path, visited, segments, crossCount } = curr;
+
+      const maxReach = (remS * UNIT_S) + ((remL + remR) * (2 * RADIUS * Math.sin(rad(ARC/2))));
+      if (Math.hypot(x, y) > maxReach + UNIT_S) continue;
+
+      if (remS === 0 && remL === 0 && remR === 0) {
+        if (Math.hypot(x, y) < TOLERANCE_DIST) {
+          const can = getCanonical(path);
+          const shapeHash = getShapeHash(can);
+          if (!uniqueShapeHashes.has(shapeHash)) { 
+            uniqueShapeHashes.add(shapeHash); 
+            results.push(path); 
+          }
+        }
+        continue;
+      }
+
+      function tryNext(type) {
+        let n = calcNext(type, x, y, a);
+        let remS_new = type === 'S' ? remS - 1 : remS;
+        let remL_new = type === 'L' ? remL - 1 : remL;
+        let remR_new = type === 'R' ? remR - 1 : remR;
+        
+        let railIndex = path.length;
+        let newSegs = getSegments(type, x, y, a, railIndex);
+        let cCount = crossCount;
+        let isOverlap = false;
+
+        const isLastPiece = (remS_new === 0 && remL_new === 0 && remR_new === 0);
+
+        for (let s1 of newSegs) {
+          for (let s2 of segments) {
+            if (getLineIntersection(s1.p1, s1.p2, s2.p1, s2.p2)) {
+              cCount++;
+            }
+            if (Math.abs(s1.railIndex - s2.railIndex) <= 1) continue;
+            if (isLastPiece && s2.railIndex === 0) continue;
+
+            let dist = distBetweenSegments(s1.p1, s1.p2, s2.p1, s2.p2);
+            if (dist < RAIL_W * 0.85) {
+              let v1x = s1.p2.x - s1.p1.x, v1y = s1.p2.y - s1.p1.y;
+              let v2x = s2.p2.x - s2.p1.x, v2y = s2.p2.y - s2.p1.y;
+              let len1 = Math.hypot(v1x, v1y) || 1;
+              let len2 = Math.hypot(v2x, v2y) || 1;
+              let cosTheta = Math.abs((v1x * v2x + v1y * v2y) / (len1 * len2));
+              
+              if (cosTheta > 0.86) {
+                isOverlap = true;
+                break;
+              }
+            }
+          }
+          if (isOverlap) break;
+        }
+        
+        if (cCount > maxCross) return;
+        if (isOverlap) return;
+
+        let isCollision = false;
+        for (let i = 0; i < visited.length - 1; i++) {
+          const vj = visited[i];
+          if (Math.hypot(n.x - vj.x, n.y - vj.y) < 10) {
+            if (!(isLastPiece && i === 0)) {
+              isCollision = true; break;
+            }
+          }
+        }
+        if (isCollision) return;
+
+        stack.push({
+          x: n.x, y: n.y, a: n.a,
+          remS: remS_new, remL: remL_new, remR: remR_new,
+          path: path + type,
+          visited: [...visited, {x: n.x, y: n.y}],
+          segments: [...segments, ...newSegs], 
+          crossCount: cCount
+        });
+      }
+
+      let nextTypes = [];
+      if (remR > 0) nextTypes.push('R');
+      if (remL > 0) nextTypes.push('L');
+      if (remS > 0) nextTypes.push('S');
+      
+      for (let i = nextTypes.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [nextTypes[i], nextTypes[j]] = [nextTypes[j], nextTypes[i]];
+      }
+
+      let lastType = path.slice(-1);
+      if (lastType && nextTypes.includes(lastType) && Math.random() < 0.7) {
+        nextTypes = nextTypes.filter(t => t !== lastType);
+        nextTypes.push(lastType);
+      }
+
+      for (let t of nextTypes) tryNext(t);
+    }
+
+    const elapsedSec = ((performance.now() - startTime) / 1000).toFixed(1);
+
+    if (abortSearch) {
+      finalizeSearch(`中止されました (${elapsedSec}秒)`);
+    } else if (stack.length > 0 && results.length < MAX_RESULTS) {
+      msgEl.innerHTML = `⏳ シンキング: <strong style="color:#d32f2f;">${elapsedSec} 秒</strong><br><span style="font-size:0.8em; color:#6b7280;">抽出済: ${results.length} / ${MAX_RESULTS} 件<br>探索キュー残り: ${stack.length.toLocaleString()}件</span>`;
+      requestAnimationFrame(processChunk);
+    } else {
+      finalizeSearch(`完了: ${elapsedSec}秒`);
+    }
+  }
+
+  function finalizeSearch(statusMsg) {
+    isSearching = false;
+    btn.textContent = "自動探索"; 
+    btn.style.background = "#ffca28"; 
+    btn.style.color = "#111";
+    
+    results.sort((a, b) => evaluateShapeScore(b) - evaluateShapeScore(a));
+
+    msgEl.innerHTML = `✅ ${statusMsg}<br><span style="font-size:0.8em; color:#6b7280;">${results.length}件の異なるシルエットを発見</span>`;
+    const sel = document.getElementById("selResult");
+    sel.innerHTML = results.length ? "" : "<option value=''>結果なし</option>";
+    results.forEach((r, i) => {
+      const opt = document.createElement("option"); opt.value = r; opt.textContent = `候補 ${i+1}`; sel.appendChild(opt);
+    });
+    if(results.length) { courseStr = results[0]; fitToScreen(); }
+    else { badge.textContent = "未配置"; badge.className = "status-badge"; }
+  }
+
+  requestAnimationFrame(processChunk);
+};
+
+function navigateResults(dir) {
+  const sel = document.getElementById("selResult");
+  if (sel.options.length <= 0 || sel.options[0].value === "") return;
+  let ni = (sel.selectedIndex + dir + sel.options.length) % sel.options.length;
+  sel.selectedIndex = ni; sel.dispatchEvent(new Event('change'));
+}
+document.getElementById("btnPrev").onclick = () => navigateResults(-1);
+document.getElementById("btnNext").onclick = () => navigateResults(1);
+document.getElementById("btnFit").onclick = fitToScreen;
+document.getElementById("btnS").onclick = () => { courseStr += "S"; render(); };
+document.getElementById("btnL").onclick = () => { courseStr += "L"; render(); };
+document.getElementById("btnR").onclick = () => { courseStr += "R"; render(); };
+document.getElementById("btnUndo").onclick = () => { courseStr = courseStr.slice(0,-1); render(); };
+document.getElementById("btnReset").onclick = () => { courseStr = ""; fitToScreen(); };
+document.getElementById("selResult").onchange = (e) => { if(e.target.value){ courseStr = e.target.value; fitToScreen(); }};
+
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  const oldScale = scale;
+  scale *= (e.deltaY < 0) ? 1.1 : (1 / 1.1);
+  scale = Math.max(0.05, Math.min(scale, 5.0));
+  const mx = e.clientX - cvRect.left - cw/2, my = e.clientY - cvRect.top - ch/2;
+  offsetX = mx - (mx - offsetX) * (scale / oldScale);
+  offsetY = my - (my - offsetY) * (scale / oldScale);
+  render();
+}, { passive: false });
+
+window.addEventListener("keydown", e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') { 
+    e.preventDefault(); 
+    isSpaceDown = true; 
+    cv.classList.add('grab'); 
+  }
+  const k = e.key.toLowerCase();
+  if (k === 's') { courseStr += "S"; render(); }
+  if (k === 'l') { courseStr += "L"; render(); }
+  if (k === 'r') { courseStr += "R"; render(); }
+  if (e.key === 'Backspace') { courseStr = courseStr.slice(0,-1); render(); }
+  if (e.key === 'ArrowLeft') navigateResults(-1);
+  if (e.key === 'ArrowRight') navigateResults(1);
+  if (k === 'f') fitToScreen();
+});
+
+window.addEventListener("keyup", e => { 
+  if (e.code === 'Space') { 
+    isSpaceDown = false; 
+    isDragging = false; 
+    cv.classList.remove('grab', 'grabbing'); 
+  }
+});
+
+cv.addEventListener('mousedown', e => {
+  if (e.button === 1 || isSpaceDown) {
+    if (e.button === 1) e.preventDefault(); 
+    isDragging = true;
+    cv.classList.add('grabbing');
+    dragStartX = e.clientX - offsetX;
+    dragStartY = e.clientY - offsetY;
+  }
+});
+
+cv.addEventListener('mousemove', e => {
+  if (isDragging) {
+    offsetX = e.clientX - dragStartX;
+    offsetY = e.clientY - dragStartY;
+    render();
+  }
+});
+
+cv.addEventListener('mouseup', e => {
+  if (e.button === 1 || isSpaceDown) {
+    isDragging = false;
+    cv.classList.remove('grabbing');
+  }
+});
+
+cv.addEventListener('mouseleave', () => {
+  isDragging = false;
+  cv.classList.remove('grabbing');
+});
+
+function resize(){
+  const wrapper = document.getElementById("canvas-wrap");
+  const r = wrapper.getBoundingClientRect();
+  cvRect = r; cw = r.width; ch = r.height;
+  cv.width = cw * dpr; cv.height = ch * dpr;
+  cv.style.width = cw + "px"; cv.style.height = ch + "px";
+  render();
+}
+window.onresize = resize;
+resize();
+</script>
+</body>
+</html>
